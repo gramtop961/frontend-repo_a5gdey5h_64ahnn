@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from './components/Header.jsx';
+import Hero from './components/Hero.jsx';
+import IntegrationsBar from './components/IntegrationsBar.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import ProcessingPanel from './components/ProcessingPanel.jsx';
 import ClipsGallery from './components/ClipsGallery.jsx';
@@ -90,6 +92,10 @@ export default function App() {
       <Header backendConfigured={backendConfigured} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <Hero />
+
+        <IntegrationsBar />
+
         <UploadPanel onStart={handleStartUpload} disabled={job && ['uploading','queued','processing'].includes(job.status)} />
 
         <ProcessingPanel job={job} error={error} onReset={handleReset} />
