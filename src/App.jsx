@@ -1,28 +1,108 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Header from './components/Header.jsx';
+import UploadPanel from './components/UploadPanel.jsx';
+import ProcessingPanel from './components/ProcessingPanel.jsx';
+import ClipsGallery from './components/ClipsGallery.jsx';
 
-function App() {
-  const [count, setCount] = useState(0)
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+
+export default function App() {
+  const [job, setJob] = useState(null); // { id, status, progress, message }
+  const [clips, setClips] = useState([]); // [{ id, thumbnail_url, caption, download_url, duration, aspect_ratio }]
+  const [history, setHistory] = useState([]); // [{ id, createdAt, clips }]
+  const [error, setError] = useState('');
+  const pollRef = useRef(null);
+
+  const backendConfigured = useMemo(() => Boolean(BACKEND_URL), []);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const startPollingStatus = (jobId) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/status/${jobId}`);
+        if (!res.ok) throw new Error('Failed to fetch status');
+        const data = await res.json();
+        setJob((prev) => ({ ...prev, status: data.status, progress: data.progress ?? prev?.progress ?? 0, message: data.message || '' }));
+        if (data.status === 'completed') {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          const receivedClips = Array.isArray(data.clips) ? data.clips : [];
+          setClips(receivedClips);
+          setHistory((h) => [{ id: jobId, createdAt: new Date().toISOString(), clips: receivedClips }, ...h]);
+        }
+        if (data.status === 'failed') {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setError(data.error || 'Processing failed. Please try again.');
+        }
+      } catch (err) {
+        // Network or parsing error; keep polling but show message once
+        setError((e) => e || 'Unable to reach processing service. Check backend URL and CORS.');
+      }
+    }, 3000);
+  };
+
+  const handleStartUpload = async (file, options) => {
+    setError('');
+    setClips([]);
+    if (!backendConfigured) {
+      setError('Backend URL is not configured. Set VITE_BACKEND_URL to enable processing.');
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('clip_length', String(options.clipLength || 'auto'));
+      form.append('aspect_ratio', options.aspectRatio || 'auto');
+      form.append('auto_highlights', String(options.autoHighlights));
+
+      setJob({ id: null, status: 'uploading', progress: 5, message: 'Uploading video…' });
+      const res = await fetch(`${BACKEND_URL}/process`, {
+        method: 'POST',
+        body: form,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      if (!data.job_id) throw new Error('Invalid response from server');
+      const jobId = data.job_id;
+      setJob({ id: jobId, status: 'queued', progress: 10, message: 'Queued for processing' });
+      startPollingStatus(jobId);
+    } catch (err) {
+      setError(err.message || 'Something went wrong during upload');
+      setJob(null);
+    }
+  };
+
+  const handleReset = () => {
+    setJob(null);
+    setClips([]);
+    setError('');
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-lg">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">
-          Vibe Coding Platform
-        </h1>
-        <p className="text-gray-600 mb-6">
-          Your AI-powered development environment
-        </p>
-        <div className="text-center">
-          <button
-            onClick={() => setCount(count + 1)}
-            className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded"
-          >
-            Count is {count}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+    <div className="min-h-screen bg-neutral-950 text-white">
+      <Header backendConfigured={backendConfigured} />
 
-export default App
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <UploadPanel onStart={handleStartUpload} disabled={job && ['uploading','queued','processing'].includes(job.status)} />
+
+        <ProcessingPanel job={job} error={error} onReset={handleReset} />
+
+        <ClipsGallery clips={clips} history={history} />
+      </main>
+
+      <footer className="border-t border-white/10 mt-12">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-white/60 flex items-center justify-between">
+          <p>ClipMaster — Generate watermark-free highlight clips instantly.</p>
+          <p className="hidden sm:block">Powered by your local processing server.</p>
+        </div>
+      </footer>
+    </div>
+  );
+}
