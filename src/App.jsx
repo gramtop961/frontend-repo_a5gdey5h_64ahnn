@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from './components/Header.jsx';
-import Hero from './components/Hero.jsx';
-import IntegrationsBar from './components/IntegrationsBar.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import ProcessingPanel from './components/ProcessingPanel.jsx';
 import ClipsGallery from './components/ClipsGallery.jsx';
@@ -50,7 +48,8 @@ export default function App() {
     }, 3000);
   };
 
-  const handleStartUpload = async (file, options) => {
+  const handleStartProcessing = async (source, options) => {
+    // source: { file?: File, links?: string[] }
     setError('');
     setClips([]);
     if (!backendConfigured) {
@@ -59,24 +58,31 @@ export default function App() {
     }
     try {
       const form = new FormData();
-      form.append('file', file);
+      if (source.file) {
+        form.append('file', source.file);
+      }
+      if (source.links && source.links.length > 0) {
+        // Provide both the primary link and a JSON-encoded list so backend can decide
+        form.append('source_url', source.links[0]);
+        form.append('sources', JSON.stringify(source.links));
+      }
       form.append('clip_length', String(options.clipLength || 'auto'));
       form.append('aspect_ratio', options.aspectRatio || 'auto');
       form.append('auto_highlights', String(options.autoHighlights));
 
-      setJob({ id: null, status: 'uploading', progress: 5, message: 'Uploading video…' });
+      setJob({ id: null, status: 'uploading', progress: 5, message: source.file ? 'Uploading video…' : 'Submitting link(s)…' });
       const res = await fetch(`${BACKEND_URL}/process`, {
         method: 'POST',
         body: form,
       });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) throw new Error('Submission failed');
       const data = await res.json();
       if (!data.job_id) throw new Error('Invalid response from server');
       const jobId = data.job_id;
       setJob({ id: jobId, status: 'queued', progress: 10, message: 'Queued for processing' });
       startPollingStatus(jobId);
     } catch (err) {
-      setError(err.message || 'Something went wrong during upload');
+      setError(err.message || 'Something went wrong during submission');
       setJob(null);
     }
   };
@@ -92,11 +98,7 @@ export default function App() {
       <Header backendConfigured={backendConfigured} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <Hero />
-
-        <IntegrationsBar />
-
-        <UploadPanel onStart={handleStartUpload} disabled={job && ['uploading','queued','processing'].includes(job.status)} />
+        <UploadPanel onStart={handleStartProcessing} disabled={job && ['uploading','queued','processing'].includes(job.status)} />
 
         <ProcessingPanel job={job} error={error} onReset={handleReset} />
 
