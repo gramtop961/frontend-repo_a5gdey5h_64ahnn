@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Link as LinkIcon, ShieldCheck, AlertTriangle, RefreshCw, Save } from 'lucide-react';
+import { Link as LinkIcon, ShieldCheck, AlertTriangle, RefreshCw, Save, Info } from 'lucide-react';
 
-export default function ConnectionBar({ value, onChange, onTest, ok, loading }) {
+export default function ConnectionBar({ value, onChange, onTest, ok, loading, issue }) {
   const [temp, setTemp] = useState(value || '');
+  const [showHint, setShowHint] = useState(true);
 
   useEffect(() => {
     setTemp(value || '');
   }, [value]);
+
+  useEffect(() => {
+    // Auto-open hint when there is an issue
+    setShowHint(Boolean(issue));
+  }, [issue]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:p-4">
@@ -54,6 +60,38 @@ export default function ConnectionBar({ value, onChange, onTest, ok, loading }) 
           <span>{ok ? 'Connected' : 'Not connected'}</span>
         </div>
       </div>
+
+      {!ok && issue && (
+        <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-amber-300 mt-0.5" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <p className="font-medium text-amber-200 text-sm">{issue.title}</p>
+                <button
+                  onClick={() => setShowHint(!showHint)}
+                  className="text-xs text-amber-200/80 hover:text-amber-100"
+                >
+                  {showHint ? 'Hide' : 'Show'} details
+                </button>
+              </div>
+              {showHint && (
+                <div className="mt-1 text-amber-100/90 text-sm">
+                  <p className="mb-2">{issue.details}</p>
+                  <ul className="list-disc pl-5 space-y-1">
+                    {issue.fixes?.map((f, i) => (
+                      <li key={i}>{f}</li>
+                    ))}
+                  </ul>
+                  {issue.url && (
+                    <p className="mt-2 text-amber-200/80 break-all text-xs">URL tested: {issue.url}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

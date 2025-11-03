@@ -29,7 +29,66 @@ async function safeFetch(input, init = {}, timeoutMs = 8000) {
     return res;
   } catch (e) {
     clearTimeout(id);
+    // Normalize timeout error
+    if (e?.name === 'AbortError') {
+      const err = new Error('Request timed out');
+      err.code = 'timeout';
+      throw err;
+    }
     throw e;
+  }
+}
+
+function buildConnectionIssue({ type, url, status, note }) {
+  const securePage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  switch (type) {
+    case 'mixed_content':
+      return {
+        code: 'mixed_content',
+        title: 'Mixed content is blocked',
+        details: 'Your app is served over HTTPS but the backend URL uses HTTP. Browsers block these requests for security.',
+        fixes: [
+          'Use an HTTPS backend URL (https://…) or put your server behind a secure proxy/tunnel (Cloudflare Tunnel, ngrok, Fly, Render).',
+          'If developing locally, expose your backend via an HTTPS tunnel and use that URL here.',
+        ],
+        url,
+      };
+    case 'timeout':
+      return {
+        code: 'timeout',
+        title: 'The request timed out',
+        details: 'The server did not respond in time.',
+        fixes: [
+          'Verify the backend is running and reachable at the URL provided.',
+          'Check that /test responds quickly; heavy startup work can delay responses.',
+          'If using a free hosting tier that sleeps, wake it up and try again.',
+        ],
+        url,
+      };
+    case 'not_ok':
+      return {
+        code: 'not_ok',
+        title: 'Endpoint reached but returned an error',
+        details: `GET /test responded with status ${status ?? 'unknown'}.`,
+        fixes: [
+          'Ensure your backend defines GET /test and returns HTTP 200.',
+          'Confirm CORS is enabled to allow this origin and includes Access-Control-Allow-Origin.',
+        ],
+        url,
+      };
+    case 'cors_or_network':
+    default:
+      return {
+        code: 'cors_or_network',
+        title: 'Request was blocked (CORS or network)',
+        details: 'The browser blocked the request or could not reach the server.',
+        fixes: [
+          'Enable CORS on your backend and allow this app’s origin.',
+          'Make sure the URL is correct and publicly reachable.',
+          securePage ? 'On HTTPS pages, the backend must also be HTTPS.' : 'If testing locally, consider an HTTPS tunnel for reliability.',
+        ],
+        url,
+      };
   }
 }
 
@@ -37,6 +96,7 @@ export default function App() {
   const [backendUrl, setBackendUrl] = useState('');
   const [backendOk, setBackendOk] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [issue, setIssue] = useState(null); // connection diagnostics
 
   const [job, setJob] = useState(null); // { id, status, progress, message }
   const [clips, setClips] = useState([]); // [{ id, thumbnail_url, caption, download_url, duration, aspect_ratio }]
@@ -58,14 +118,32 @@ export default function App() {
     const test = async () => {
       if (!backendConfigured) {
         setBackendOk(false);
+        setIssue(null);
         return;
       }
       try {
         setTesting(true);
         const base = normalizeUrl(backendUrl);
+        // Mixed-content guard
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && base.startsWith('http:')) {
+          setBackendOk(false);
+          setIssue(buildConnectionIssue({ type: 'mixed_content', url: base }));
+          return;
+        }
         const res = await safeFetch(`${base}/test`);
-        setBackendOk(res.ok);
-      } catch {
+        if (!res.ok) {
+          setBackendOk(false);
+          setIssue(buildConnectionIssue({ type: 'not_ok', url: base, status: res.status }));
+          return;
+        }
+        setBackendOk(true);
+        setIssue(null);
+      } catch (e) {
+        if (e?.code === 'timeout') {
+          setIssue(buildConnectionIssue({ type: 'timeout', url: backendUrl }));
+        } else {
+          setIssue(buildConnectionIssue({ type: 'cors_or_network', url: backendUrl }));
+        }
         setBackendOk(false);
       } finally {
         setTesting(false);
@@ -156,6 +234,7 @@ export default function App() {
     const norm = normalizeUrl(url);
     setBackendOk(false);
     setBackendUrl(norm);
+    setIssue(null);
     if (typeof window !== 'undefined') {
       if (norm) {
         window.localStorage.setItem(LS_KEY, norm);
@@ -172,15 +251,27 @@ export default function App() {
       setTesting(true);
       // Mixed-content guard
       if (typeof window !== 'undefined' && window.location.protocol === 'https:' && norm.startsWith('http:')) {
-        throw new Error('Mixed content blocked: Your site is HTTPS but backend is HTTP. Use HTTPS backend or a secure proxy.');
+        const i = buildConnectionIssue({ type: 'mixed_content', url: norm });
+        setIssue(i);
+        setBackendOk(false);
+        return;
       }
       const res = await safeFetch(`${norm}/test`);
-      setBackendOk(res.ok);
-      if (res.ok) setBackendUrl(norm);
-      if (!res.ok) setError('Backend responded but did not return OK at /test');
+      if (res.ok) {
+        setBackendOk(true);
+        setIssue(null);
+        setBackendUrl(norm);
+      } else {
+        setBackendOk(false);
+        setIssue(buildConnectionIssue({ type: 'not_ok', url: norm, status: res.status }));
+      }
     } catch (e) {
+      if (e?.code === 'timeout') {
+        setIssue(buildConnectionIssue({ type: 'timeout', url: norm }));
+      } else {
+        setIssue(buildConnectionIssue({ type: 'cors_or_network', url: norm }));
+      }
       setBackendOk(false);
-      setError(e.message || 'Failed to connect. Check URL, CORS, and network.');
     } finally {
       setTesting(false);
     }
@@ -198,6 +289,7 @@ export default function App() {
           onTest={handleTestUrl}
           ok={backendOk}
           loading={testing}
+          issue={issue}
         />
 
         {!backendConfigured && (
