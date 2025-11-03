@@ -9,6 +9,30 @@ import ConnectionBar from './components/ConnectionBar.jsx';
 const ENV_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 const LS_KEY = 'clipmaster.backendUrl';
 
+function normalizeUrl(url) {
+  if (!url) return '';
+  try {
+    const trimmed = url.trim().replace(/\/$/, '');
+    const u = new URL(trimmed);
+    return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+  } catch {
+    return url.trim().replace(/\/$/, '');
+  }
+}
+
+async function safeFetch(input, init = {}, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(input, { mode: 'cors', credentials: 'omit', ...init, signal: ctrl.signal });
+    clearTimeout(id);
+    return res;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
+
 export default function App() {
   const [backendUrl, setBackendUrl] = useState('');
   const [backendOk, setBackendOk] = useState(false);
@@ -23,7 +47,7 @@ export default function App() {
   // Initialize backend URL from localStorage override or env
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem(LS_KEY) : '';
-    const initial = saved || ENV_BACKEND_URL;
+    const initial = normalizeUrl(saved || ENV_BACKEND_URL);
     setBackendUrl(initial);
   }, []);
 
@@ -38,7 +62,8 @@ export default function App() {
       }
       try {
         setTesting(true);
-        const res = await fetch(`${backendUrl}/test`);
+        const base = normalizeUrl(backendUrl);
+        const res = await safeFetch(`${base}/test`);
         setBackendOk(res.ok);
       } catch {
         setBackendOk(false);
@@ -60,7 +85,8 @@ export default function App() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${backendUrl}/status/${jobId}`);
+        const base = normalizeUrl(backendUrl);
+        const res = await safeFetch(`${base}/status/${jobId}`);
         if (!res.ok) throw new Error('Failed to fetch status');
         const data = await res.json();
         setJob((prev) => ({ ...prev, status: data.status, progress: data.progress ?? prev?.progress ?? 0, message: data.message || '' }));
@@ -77,7 +103,7 @@ export default function App() {
           setError(data.error || 'Processing failed. Please try again.');
         }
       } catch (err) {
-        setError((e) => e || 'Unable to reach processing service. Check backend URL and CORS.');
+        setError((e) => e || 'Unable to reach processing service. If your app is served over HTTPS, using an HTTP backend will be blocked by the browser. Use an HTTPS backend or a proxy.');
       }
     }, 3000);
   };
@@ -103,10 +129,11 @@ export default function App() {
       form.append('auto_highlights', String(options.autoHighlights));
 
       setJob({ id: null, status: 'uploading', progress: 5, message: source.file ? 'Uploading video…' : 'Submitting link(s)…' });
-      const res = await fetch(`${backendUrl}/process`, {
+      const base = normalizeUrl(backendUrl);
+      const res = await safeFetch(`${base}/process`, {
         method: 'POST',
         body: form,
-      });
+      }, 30000);
       if (!res.ok) throw new Error('Submission failed');
       const data = await res.json();
       if (!data.job_id) throw new Error('Invalid response from server');
@@ -126,11 +153,12 @@ export default function App() {
   };
 
   const handleSaveUrl = (url) => {
+    const norm = normalizeUrl(url);
     setBackendOk(false);
-    setBackendUrl(url.trim());
+    setBackendUrl(norm);
     if (typeof window !== 'undefined') {
-      if (url && url.trim()) {
-        window.localStorage.setItem(LS_KEY, url.trim());
+      if (norm) {
+        window.localStorage.setItem(LS_KEY, norm);
       } else {
         window.localStorage.removeItem(LS_KEY);
       }
@@ -138,14 +166,21 @@ export default function App() {
   };
 
   const handleTestUrl = async (url) => {
-    if (!url) return;
+    const norm = normalizeUrl(url);
+    if (!norm) return;
     try {
       setTesting(true);
-      const res = await fetch(`${url}/test`);
+      // Mixed-content guard
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && norm.startsWith('http:')) {
+        throw new Error('Mixed content blocked: Your site is HTTPS but backend is HTTP. Use HTTPS backend or a secure proxy.');
+      }
+      const res = await safeFetch(`${norm}/test`);
       setBackendOk(res.ok);
-      if (res.ok) setBackendUrl(url);
-    } catch {
+      if (res.ok) setBackendUrl(norm);
+      if (!res.ok) setError('Backend responded but did not return OK at /test');
+    } catch (e) {
       setBackendOk(false);
+      setError(e.message || 'Failed to connect. Check URL, CORS, and network.');
     } finally {
       setTesting(false);
     }
@@ -168,6 +203,12 @@ export default function App() {
         {!backendConfigured && (
           <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-200 px-4 py-3 text-sm">
             Enter your processing server URL above and click Test to connect.
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-200 px-4 py-3 text-sm">
+            {error}
           </div>
         )}
 
