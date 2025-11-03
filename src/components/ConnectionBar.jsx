@@ -14,6 +14,23 @@ export default function ConnectionBar({ value, onChange, onTest, ok, loading, is
     setShowHint(Boolean(issue));
   }, [issue]);
 
+  const GenericHint = () => (
+    <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3">
+      <div className="flex items-start gap-2">
+        <Info className="h-4 w-4 text-amber-300 mt-0.5" />
+        <div className="flex-1 text-sm text-amber-100/90">
+          <p className="font-medium text-amber-200">Not connected</p>
+          <p className="mt-1">Enter your server URL and click Test. If it still fails:</p>
+          <ul className="list-disc pl-5 space-y-1 mt-2">
+            <li>Ensure your backend exposes GET /test and allows CORS for this origin.</li>
+            <li>If this page is HTTPS, your backend must also be HTTPS (browser blocks mixed content).</li>
+            <li>Wake sleeping free-tier hosts or try again later if it times out.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:p-4">
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
@@ -92,6 +109,8 @@ export default function ConnectionBar({ value, onChange, onTest, ok, loading, is
           </div>
         </div>
       )}
+
+      {!ok && !issue && <GenericHint />}
     </div>
   );
 }
