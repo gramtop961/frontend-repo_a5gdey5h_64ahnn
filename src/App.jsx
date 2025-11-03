@@ -4,32 +4,51 @@ import HeroCover from './components/HeroCover.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import ProcessingPanel from './components/ProcessingPanel.jsx';
 import ClipsGallery from './components/ClipsGallery.jsx';
+import ConnectionBar from './components/ConnectionBar.jsx';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+const ENV_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+const LS_KEY = 'clipmaster.backendUrl';
 
 export default function App() {
+  const [backendUrl, setBackendUrl] = useState('');
+  const [backendOk, setBackendOk] = useState(false);
+  const [testing, setTesting] = useState(false);
+
   const [job, setJob] = useState(null); // { id, status, progress, message }
   const [clips, setClips] = useState([]); // [{ id, thumbnail_url, caption, download_url, duration, aspect_ratio }]
   const [history, setHistory] = useState([]); // [{ id, createdAt, clips }]
   const [error, setError] = useState('');
-  const [backendOk, setBackendOk] = useState(false);
   const pollRef = useRef(null);
 
-  const backendConfigured = useMemo(() => Boolean(BACKEND_URL), []);
-
+  // Initialize backend URL from localStorage override or env
   useEffect(() => {
-    // Probe backend connectivity when configured
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem(LS_KEY) : '';
+    const initial = saved || ENV_BACKEND_URL;
+    setBackendUrl(initial);
+  }, []);
+
+  const backendConfigured = useMemo(() => Boolean(backendUrl), [backendUrl]);
+
+  // Probe backend whenever URL changes
+  useEffect(() => {
     const test = async () => {
-      if (!backendConfigured) return;
+      if (!backendConfigured) {
+        setBackendOk(false);
+        return;
+      }
       try {
-        const res = await fetch(`${BACKEND_URL}/test`);
+        setTesting(true);
+        const res = await fetch(`${backendUrl}/test`);
         setBackendOk(res.ok);
       } catch {
         setBackendOk(false);
+      } finally {
+        setTesting(false);
       }
     };
     test();
-  }, [backendConfigured]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendUrl]);
 
   useEffect(() => {
     return () => {
@@ -41,7 +60,7 @@ export default function App() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/status/${jobId}`);
+        const res = await fetch(`${backendUrl}/status/${jobId}`);
         if (!res.ok) throw new Error('Failed to fetch status');
         const data = await res.json();
         setJob((prev) => ({ ...prev, status: data.status, progress: data.progress ?? prev?.progress ?? 0, message: data.message || '' }));
@@ -67,7 +86,7 @@ export default function App() {
     setError('');
     setClips([]);
     if (!backendConfigured) {
-      setError('Backend URL is not configured. Set VITE_BACKEND_URL to enable processing.');
+      setError('Backend URL is not configured. Set it using the field above.');
       return;
     }
     try {
@@ -84,7 +103,7 @@ export default function App() {
       form.append('auto_highlights', String(options.autoHighlights));
 
       setJob({ id: null, status: 'uploading', progress: 5, message: source.file ? 'Uploading video…' : 'Submitting link(s)…' });
-      const res = await fetch(`${BACKEND_URL}/process`, {
+      const res = await fetch(`${backendUrl}/process`, {
         method: 'POST',
         body: form,
       });
@@ -106,15 +125,49 @@ export default function App() {
     setError('');
   };
 
+  const handleSaveUrl = (url) => {
+    setBackendOk(false);
+    setBackendUrl(url.trim());
+    if (typeof window !== 'undefined') {
+      if (url && url.trim()) {
+        window.localStorage.setItem(LS_KEY, url.trim());
+      } else {
+        window.localStorage.removeItem(LS_KEY);
+      }
+    }
+  };
+
+  const handleTestUrl = async (url) => {
+    if (!url) return;
+    try {
+      setTesting(true);
+      const res = await fetch(`${url}/test`);
+      setBackendOk(res.ok);
+      if (res.ok) setBackendUrl(url);
+    } catch {
+      setBackendOk(false);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0b0616] via-[#120a26] to-[#0a0717] text-white">
       <HeroCover />
       <Header backendConfigured={backendConfigured && backendOk} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <ConnectionBar
+          value={backendUrl}
+          onChange={handleSaveUrl}
+          onTest={handleTestUrl}
+          ok={backendOk}
+          loading={testing}
+        />
+
         {!backendConfigured && (
           <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-200 px-4 py-3 text-sm">
-            Backend URL is not set. Set VITE_BACKEND_URL to your API (e.g. https://...:8000) and reload.
+            Enter your processing server URL above and click Test to connect.
           </div>
         )}
 
@@ -128,7 +181,7 @@ export default function App() {
       <footer className="border-t border-white/10 mt-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-white/70 flex items-center justify-between">
           <p>ClipMaster — Generate watermark-free highlight clips instantly.</p>
-          <p className="hidden sm:block">Powered by your local processing server.</p>
+          <p className="hidden sm:block">Powered by your processing server.</p>
         </div>
       </footer>
     </div>
