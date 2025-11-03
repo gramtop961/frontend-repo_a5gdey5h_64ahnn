@@ -12,9 +12,24 @@ export default function App() {
   const [clips, setClips] = useState([]); // [{ id, thumbnail_url, caption, download_url, duration, aspect_ratio }]
   const [history, setHistory] = useState([]); // [{ id, createdAt, clips }]
   const [error, setError] = useState('');
+  const [backendOk, setBackendOk] = useState(false);
   const pollRef = useRef(null);
 
   const backendConfigured = useMemo(() => Boolean(BACKEND_URL), []);
+
+  useEffect(() => {
+    // Probe backend connectivity when configured
+    const test = async () => {
+      if (!backendConfigured) return;
+      try {
+        const res = await fetch(`${BACKEND_URL}/test`);
+        setBackendOk(res.ok);
+      } catch {
+        setBackendOk(false);
+      }
+    };
+    test();
+  }, [backendConfigured]);
 
   useEffect(() => {
     return () => {
@@ -94,9 +109,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0b0616] via-[#120a26] to-[#0a0717] text-white">
       <HeroCover />
-      <Header backendConfigured={backendConfigured} />
+      <Header backendConfigured={backendConfigured && backendOk} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {!backendConfigured && (
+          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 text-amber-200 px-4 py-3 text-sm">
+            Backend URL is not set. Set VITE_BACKEND_URL to your API (e.g. https://...:8000) and reload.
+          </div>
+        )}
+
         <UploadPanel onStart={handleStartProcessing} disabled={job && ['uploading','queued','processing'].includes(job.status)} />
 
         <ProcessingPanel job={job} error={error} onReset={handleReset} />
