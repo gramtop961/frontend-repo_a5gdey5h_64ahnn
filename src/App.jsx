@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from './components/Header.jsx';
+import HeroCover from './components/HeroCover.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import ProcessingPanel from './components/ProcessingPanel.jsx';
 import ClipsGallery from './components/ClipsGallery.jsx';
@@ -42,14 +43,12 @@ export default function App() {
           setError(data.error || 'Processing failed. Please try again.');
         }
       } catch (err) {
-        // Network or parsing error; keep polling but show message once
         setError((e) => e || 'Unable to reach processing service. Check backend URL and CORS.');
       }
     }, 3000);
   };
 
   const handleStartProcessing = async (source, options) => {
-    // source: { file?: File, links?: string[] }
     setError('');
     setClips([]);
     if (!backendConfigured) {
@@ -62,7 +61,6 @@ export default function App() {
         form.append('file', source.file);
       }
       if (source.links && source.links.length > 0) {
-        // Provide both the primary link and a JSON-encoded list so backend can decide
         form.append('source_url', source.links[0]);
         form.append('sources', JSON.stringify(source.links));
       }
@@ -94,7 +92,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white">
+    <div className="min-h-screen bg-gradient-to-b from-[#0b0616] via-[#120a26] to-[#0a0717] text-white">
+      <HeroCover />
       <Header backendConfigured={backendConfigured} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -106,7 +105,7 @@ export default function App() {
       </main>
 
       <footer className="border-t border-white/10 mt-12">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-white/60 flex items-center justify-between">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-white/70 flex items-center justify-between">
           <p>ClipMaster — Generate watermark-free highlight clips instantly.</p>
           <p className="hidden sm:block">Powered by your local processing server.</p>
         </div>
